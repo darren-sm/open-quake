@@ -2,20 +2,23 @@ import requests
 import re
 import concurrent.futures  
 import urllib3
+import logging
 from tqdm import tqdm
 from urllib.parse import urljoin
 from datetime import datetime
 from bs4 import BeautifulSoup
 from modules.io import write_json, read_json, into_parquet
 
-URL = "https://earthquake.phivolcs.dost.gov.ph/EQLatest-Monthly/2023/2023_January.html"
+URL = "https://earthquake.phivolcs.dost.gov.ph/EQLatest-Monthly/2023/2023_February.html"
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0'}
 
 # Send an HTTP GET request and parse it with BeautifulSoup
 def parsed_request(link):
     r = requests.get(link, verify = False, headers = HEADERS)
-    if r.status_code == 200:
+    if r.ok:
+        logging.debug("Status 200 on %s HTTP GET request", link)
         return BeautifulSoup(r.text, 'lxml')
+    logging.warning("HTTP Request on %s did not went through")
     return None
 
 # Create datetime object from the string (of different formats)
@@ -25,7 +28,8 @@ def _parse_date(str_date):
             return datetime.strptime(str_date, date_format)
         except:
             pass
-    raise ValueError(f'No valid date format for {str_date} found')
+    logging.error("No valid date format for %s found", str_date)
+    raise SystemExit("Parsing date failed")
 
 def get_data(parsed_html):
     # Select the table to retrieve the data from
@@ -72,7 +76,9 @@ def download_links(parsed_html):
             })    
 
     # Save the data into JSON file
-    write_json(month_conf, f"conf/{month}.json")
+    filename = f"conf/{month}.json"
+    logging.info("%s earthquake records for the month of %s stored in %s", len(month_conf), month, filename)
+    write_json(month_conf, filename)
 
 
 # Using the items in `finished_urls`, set scraped=True for targets in the month's conf
@@ -83,9 +89,16 @@ def update_conf(filename, targets, finished_urls):
             targets[i]['scraped'] = True
 
     # Write the changes to month's conf
+    logging.debug("%s conf updated with %s out of %s successfully scraped", filename, len(finished_urls), len(targets))
     write_json(targets, filename)
 
 if __name__ == '__main__':
+    # Loggging config
+    logging.basicConfig(filename = f"logs/{datetime.now().strftime('%Y %m %d - %I:%M %p')}.log", 
+                        encoding="utf-8", 
+                        level=logging.DEBUG,
+                        format = '%(levelname)s: %(message)s'
+                        )
     urllib3.disable_warnings()
 
     # Target month should be in the URL (in python args)
@@ -95,8 +108,9 @@ if __name__ == '__main__':
     # Download if the target month's JSON does not yet exist    
     download_links(html)
 
-    # Retrieve the links from JSON file   
-    targets = read_json('conf/January 2023.json')
+    # Retrieve the links from JSON file  
+    month_conf =  'conf/February 2023.json'
+    targets = read_json(month_conf)
     print("List of targets saved to ./conf/January 2023.json")
 
     # Fetch the month's all data
@@ -126,7 +140,7 @@ if __name__ == '__main__':
                 finished_urls.add(url)
             bar.update(n=1)    
 
-    
+    update_conf(month_conf, targets, finished_urls)
     
     
     # Transform and save data into parquet
