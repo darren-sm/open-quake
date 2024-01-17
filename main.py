@@ -11,12 +11,14 @@ from modules.io import write_json, read_json, into_parquet
 URL = "https://earthquake.phivolcs.dost.gov.ph/EQLatest-Monthly/2023/2023_January.html"
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0'}
 
+# Send an HTTP GET request and parse it with BeautifulSoup
 def parsed_request(link):
     r = requests.get(link, verify = False, headers = HEADERS)
     if r.status_code == 200:
         return BeautifulSoup(r.text, 'lxml')
     return None
 
+# Create datetime object from the string (of different formats)
 def _parse_date(str_date):
     for date_format in ('%d %b %Y - %I:%M:%S %p', '%d %b %Y - %I:%M %p', '%d %B %Y - %I:%M:%S %p', '%d %B %Y - %I:%M %p'):
         try:
@@ -70,8 +72,18 @@ def download_links(parsed_html):
             })    
 
     # Save the data into JSON file
-    write_json(month_conf[:10], f"conf/{month}.json")
+    write_json(month_conf, f"conf/{month}.json")
 
+
+# Using the items in `finished_urls`, set scraped=True for targets in the month's conf
+def update_conf(filename, targets, finished_urls):
+    # Change `scraped` value of every item in the list of dict
+    for i in range(len(targets)):
+        if targets[i]['url'] in finished_urls:
+            targets[i]['scraped'] = True
+
+    # Write the changes to month's conf
+    write_json(targets, filename)
 
 if __name__ == '__main__':
     urllib3.disable_warnings()
@@ -89,16 +101,37 @@ if __name__ == '__main__':
 
     # Fetch the month's all data
     print("Now parsing each earthquake document record to retrieve the data")
-    data = []    
+    data = []  
+    finished_urls = set()
+    
+    # Use tqdm for progress bar  
     bar = tqdm(total=len(targets), desc="Traversing each earthquake activity")
-    with concurrent.futures.ThreadPoolExecutor() as executor:        
-        for parsed_html in executor.map(parsed_request, (target['url'] for target in targets if not target['scraped'])):
+    
+    # Send the requests on the earthquake record urls with multithreading
+    with concurrent.futures.ThreadPoolExecutor() as executor: 
+        # Return the parsed html (from the HTTP request), and the original URL (from targets)                       
+        for result in executor.map(
+            lambda target: {
+                'url': target['url'], 
+                'parsed_html': parsed_request(target['url'])
+            },
+            targets
+            ):
+            url = result['url']
+            # Use the parsed html to retrieve the earthquake data
+            parsed_html = result['parsed_html']
             if parsed_html:
-                data.append(get_data(parsed_html))                
+                data.append(get_data(parsed_html))               
+                # Use the original URL to keep track of successful scraping
+                finished_urls.add(url)
             bar.update(n=1)    
 
-    # For target in targets, if target[date] in [d[date] for d in data], set target['scraped'] = True
-    print(f"Process Complete. Total {len(data)}/{len(targets)} targets successfully scraped.")
+    
+    
+    
     # Transform and save data into parquet
     into_parquet(data, "test")
+
+    # Program Completion
+    print(f"Process Complete. Total {len(finished_urls)}/{len(targets)} targets successfully scraped.")
     print("Data saved into test.parquet")
