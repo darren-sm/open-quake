@@ -9,7 +9,7 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 from modules.io import write_json, read_json, into_parquet
 
-URL = "https://earthquake.phivolcs.dost.gov.ph/EQLatest-Monthly/2023/2023_February.html"
+URL = "https://earthquake.phivolcs.dost.gov.ph"
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0'}
 
 # Send an HTTP GET request and parse it with BeautifulSoup
@@ -33,8 +33,8 @@ def _parse_date(str_date):
 
 def get_data(parsed_html):
     # Select the table to retrieve the data from
-    eq_t, intensity_t, extra_t = parsed_html.select('table table.MsoNormalTable')
-    
+    tables = parsed_html.select('table table.MsoNormalTable')
+    eq_t, intensity_t, extra_t = tables
     # Query for data attributes
     eq_datetime, location, depth, origin, magnitude = [i.select_one('td:nth-child(2)').text.strip() for i in eq_t.select('tr')]    
     coordinates = re.search( r'(\d+\.\d+|\d+).+, (\d+\.\d+|\d+)', location.split('-')[0])    
@@ -53,7 +53,6 @@ def get_data(parsed_html):
         'issued_on': _parse_date(issued_on),
         'prepared_by': prepared_by
     }
-
 
 def download_links(parsed_html):
     # Target Month
@@ -80,6 +79,8 @@ def download_links(parsed_html):
     logging.info("%s earthquake records for the month of %s stored in %s", len(month_conf), month, filename)
     write_json(month_conf, filename)
 
+    return month
+
 
 # Using the items in `finished_urls`, set scraped=True for targets in the month's conf
 def update_conf(filename, targets, finished_urls):
@@ -92,8 +93,7 @@ def update_conf(filename, targets, finished_urls):
     logging.debug("%s conf updated with %s out of %s successfully scraped", filename, len(finished_urls), len(targets))
     write_json(targets, filename)
 
-if __name__ == '__main__':
-    # Loggging config
+def download_month_data(month_link = URL):
     logging.basicConfig(filename = f"logs/{datetime.now().strftime('%Y %m %d - %I:%M %p')}.log", 
                         encoding="utf-8", 
                         level=logging.DEBUG,
@@ -102,16 +102,16 @@ if __name__ == '__main__':
     urllib3.disable_warnings()
 
     # Target month should be in the URL (in python args)
-    print("Fetching earthquake records for January 2023")
-    html = parsed_request(URL)
+    print(f"Fetching earthquake records from {month_link}")
+    html = parsed_request(month_link)
     
     # Download if the target month's JSON does not yet exist    
-    download_links(html)
+    month_name = download_links(html)
 
     # Retrieve the links from JSON file  
-    month_conf =  'conf/February 2023.json'
+    month_conf =  f'conf/{month_name}.json'
     targets = read_json(month_conf)
-    print("List of targets saved to ./conf/January 2023.json")
+    print(f"List of targets saved to ./conf/{month_name}.json")
 
     # Fetch the month's all data
     print("Now parsing each earthquake document record to retrieve the data")
@@ -135,16 +135,22 @@ if __name__ == '__main__':
             # Use the parsed html to retrieve the earthquake data
             parsed_html = result['parsed_html']
             if parsed_html:
-                data.append(get_data(parsed_html))               
-                # Use the original URL to keep track of successful scraping
-                finished_urls.add(url)
+                try:
+                    parsed_data = get_data(parsed_html)
+                    data.append(parsed_data)
+                    # Use the original URL to keep track of successful scraping
+                    finished_urls.add(url)
+                except ValueError:
+                    logging.warning("Parsing data from %s failed", url)
+                
+                    
             bar.update(n=1)    
 
     update_conf(month_conf, targets, finished_urls)
     
     
     # Transform and save data into parquet
-    into_parquet(data, "test")
+    into_parquet(data, month_name)
 
     # Program Completion
     print(f"Process Complete. Total {len(finished_urls)}/{len(targets)} targets successfully scraped.")
