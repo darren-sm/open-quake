@@ -1,3 +1,4 @@
+import os
 import json
 import pandas as pd
 import pyarrow as pa
@@ -21,3 +22,24 @@ def into_parquet(dict_data, filename):
     # Save into Parquet file
     table = pa.Table.from_pandas(df)
     pq.write_table(table, f"{filename}.parquet")
+
+
+
+def upload_to_gcs(client, filename, bucket = 'open-quake1', folder = ''):
+    bucket = client.bucket(bucket)
+    
+    object_key = os.path.join(folder, os.path.basename(filename))
+    gcs_object = bucket.blob(object_key)
+    gcs_object.upload_from_filename(filename)
+    
+def download_object(client, object_key, filename, bucket = 'open-quake1'):
+    bucket = client.bucket(bucket)
+
+    foo = bucket.blob(object_key)
+    foo.download_to_filename(filename)
+
+
+def object_exists(client, object_key, bucket = 'open-quake1'):
+    bucket = client.bucket(bucket)
+    foo = bucket.blob(object_key)
+    return foo.exists()

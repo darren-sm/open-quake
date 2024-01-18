@@ -1,20 +1,26 @@
+import os
 import requests
 import re
 import concurrent.futures  
 import urllib3
 import logging
+from glob import glob
+from google.cloud import storage
 from tqdm import tqdm
 from urllib.parse import urljoin
 from datetime import datetime
 from bs4 import BeautifulSoup
-from modules.io import write_json, read_json, into_parquet
+from modules.io import *
 
 URL = "https://earthquake.phivolcs.dost.gov.ph"
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0'}
 
 # Send an HTTP GET request and parse it with BeautifulSoup
 def parsed_request(link):
-    r = requests.get(link, verify = False, headers = HEADERS)
+    try:
+        r = requests.get(link, verify = False, headers = HEADERS)
+    except requests.exceptions.RequestException:
+        return None
     if r.ok:
         logging.debug("Status 200 on %s HTTP GET request", link)
         return BeautifulSoup(r.text, 'lxml')
@@ -55,9 +61,6 @@ def get_data(parsed_html):
     }
 
 def download_links(parsed_html):
-    # Target Month
-    month = parsed_html.select_one('div > table.MsoNormalTable:nth-of-type(2) strong').text
-
     # Data
     table = parsed_html.select_one('div > table.MsoNormalTable:nth-of-type(3)')
     records = table.select('td span a')
@@ -74,12 +77,7 @@ def download_links(parsed_html):
                 'scraped': False
             })    
 
-    # Save the data into JSON file
-    filename = f"conf/{month}.json"
-    logging.info("%s earthquake records for the month of %s stored in %s", len(month_conf), month, filename)
-    write_json(month_conf, filename)
-
-    return month
+    return month_conf
 
 
 # Using the items in `finished_urls`, set scraped=True for targets in the month's conf
@@ -93,27 +91,58 @@ def update_conf(filename, targets, finished_urls):
     logging.debug("%s conf updated with %s out of %s successfully scraped", filename, len(finished_urls), len(targets))
     write_json(targets, filename)
 
+
 def download_month_data(month_link = URL):
-    logging.basicConfig(filename = f"logs/{datetime.now().strftime('%Y %m %d - %I:%M %p')}.log", 
+    log_fname = f"logs/{datetime.now().strftime('%Y %m %d - %I:%M %p')}.log"
+    logging.basicConfig(filename = log_fname, 
                         encoding="utf-8", 
                         level=logging.DEBUG,
                         format = '%(levelname)s: %(message)s'
                         )
     urllib3.disable_warnings()
 
+    # GCS Client
+    client = storage.Client.from_service_account_json("credentials.json")
+
     # Target month should be in the URL (in python args)
     print(f"Fetching earthquake records from {month_link}")
     html = parsed_request(month_link)
-    
-    # Download if the target month's JSON does not yet exist    
-    month_name = download_links(html)
+    month_name = html.select_one('div > table.MsoNormalTable:nth-of-type(2) strong').text
 
-    # Retrieve the links from JSON file  
+    # Has the target month already been scraped? (Useful in scraping same month multiple times like in fetching the latest data)
     month_conf =  f'conf/{month_name}.json'
-    targets = read_json(month_conf)
-    print(f"List of targets saved to ./conf/{month_name}.json")
+    previous_targets = []
+    if object_exists(client, month_conf):
+        logging.debug("Downloading month's previous conf file %s", month_conf)
+        download_object(client, month_conf, month_conf)
+        previous_targets.extend(read_json(month_conf))
 
-    # Fetch the month's all data
+    # What are the records stored in the current month?
+    current_targets = download_links(html)
+
+    # Target the records that were not included in the already scraped items
+    targets = [a for a in previous_targets if not a['scraped']]
+    new_items = []
+    for t in current_targets:        
+        if t['url'] not in [a['url'] for a in previous_targets]:
+            new_items.append(t)
+    targets.extend(new_items)
+
+    # Exit the app if there are no new records to scrape
+    if not targets and not new_items:
+        logging.info("No new record for %s to scrape", month_name)
+        os._exit(1)
+    
+    print(f"Found {len(targets)} items to be scraped")
+
+    # Save the new records to the month conf
+    previous_targets.extend(new_items)
+    write_json(previous_targets, month_conf)
+    print(f"List of targets saved to ./conf/{month_name}.json")
+    upload_to_gcs(client, month_conf, folder = 'conf')
+    logging.info("%s file has been uploaded to open-quake1 bucket in %s folder", month_conf, 'conf')
+
+    # Start fetching the month's all data
     print("Now parsing each earthquake document record to retrieve the data")
     data = []  
     finished_urls = set()
@@ -146,12 +175,28 @@ def download_month_data(month_link = URL):
                     
             bar.update(n=1)    
 
-    update_conf(month_conf, targets, finished_urls)
+    # Upload updated conf to GCS
+    update_conf(month_conf, previous_targets, finished_urls)
+    upload_to_gcs(client, month_conf, folder = 'conf')
     
     
     # Transform and save data into parquet
-    into_parquet(data, month_name)
+    if data:
+        parquet_filename = f"/tmp/{month_name} - p{len(glob(month_name + '*')) + 1:02}"
+        into_parquet(data, parquet_filename)
+        print(f"Data saved into {parquet_filename}.parquet")
+
+        # Upload parquet to GCS
+        upload_to_gcs(client, f"{parquet_filename}.parquet")
+        logging.info("%s file has been uploaded to open-quake1 bucket", f"{parquet_filename}.parquet")
+        print(f"{parquet_filename}.parquet successfully uploaded to GCS")
+        print(f"Data saved into {parquet_filename}.parquet")
 
     # Program Completion
     print(f"Process Complete. Total {len(finished_urls)}/{len(targets)} targets successfully scraped.")
-    print("Data saved into test.parquet")
+    
+
+    # Upload log to GCS
+    logging.shutdown()
+    upload_to_gcs(client, log_fname, folder = "logs")
+    logging.info("%s file has been uploaded to open-quake1 bucket in %s folder", log_fname, 'logs')
