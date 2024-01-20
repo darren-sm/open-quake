@@ -190,13 +190,11 @@ def download_month_data(month_link = URL):
         upload_to_gcs(client, f"{parquet_filename}.parquet")
         logging.info("%s file has been uploaded to open-quake1 bucket", f"{parquet_filename}.parquet")
         print(f"{parquet_filename}.parquet successfully uploaded to GCS")
-        print(f"Data saved into {parquet_filename}.parquet")
-
-    # Program Completion
-    print(f"Process Complete. Total {len(finished_urls)}/{len(targets)} targets successfully scraped.")
-    
+        print(f"Data saved into {parquet_filename}.parquet")    
 
     # Upload log to GCS
     logging.shutdown()
-    upload_to_gcs(client, log_fname, folder = "logs")
-    logging.info("%s file has been uploaded to open-quake1 bucket in %s folder", log_fname, 'logs')
+    upload_to_gcs(client, log_fname, folder = "logs")    
+
+    # Program Completion
+    return f"Process Complete. Total {len(finished_urls)}/{len(targets)} targets successfully scraped."
