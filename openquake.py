@@ -93,10 +93,7 @@ def update_conf(filename, targets, finished_urls):
 
 
 def download_month_data(month_link = URL):
-    log_fname = f"logs/{datetime.now().strftime('%Y %m %d - %I:%M %p')}.log"
-    logging.basicConfig(filename = log_fname, 
-                        encoding="utf-8", 
-                        level=logging.DEBUG,
+    logging.basicConfig(level=logging.DEBUG,
                         format = '%(levelname)s: %(message)s'
                         )
     urllib3.disable_warnings()
@@ -191,10 +188,6 @@ def download_month_data(month_link = URL):
         logging.info("%s file has been uploaded to open-quake1 bucket", f"{parquet_filename}.parquet")
         print(f"{parquet_filename}.parquet successfully uploaded to GCS")
         print(f"Data saved into {parquet_filename}.parquet")    
-
-    # Upload log to GCS
-    logging.shutdown()
-    upload_to_gcs(client, log_fname, folder = "logs")    
 
     # Program Completion
     return f"Process Complete. Total {len(finished_urls)}/{len(targets)} targets successfully scraped."
