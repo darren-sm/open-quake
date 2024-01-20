@@ -4,7 +4,9 @@ This is a simple pipeline for [DOST Philippine Institute of Volcanology and Seis
 
 ## Dashboard
 
+[Dashboard Link](https://lookerstudio.google.com/s/grdqh93EDy4) (Updated every minute)
 
+![Dashboard](./docs/dashboard.gif)
 
 ## How it works
 
@@ -12,7 +14,7 @@ This is a simple pipeline for [DOST Philippine Institute of Volcanology and Seis
 
 **Data**
 
-Phivolcs issue a bulletin for every earthquake activity recorded on their stations around the Philippines.
+Phivolcs issue a bulletin for every earthquake activity recorded on their stations around the Philippines. The project processes the 2019-present data.
 
 |        DateTime         | Location (Lat & Long) |   Depth    | Magnitude |                Origin                 | Intensity  |
 | :---------------------: | :-------------------: | :--------: | :-------: | :-----------------------------------: | :--------: |
