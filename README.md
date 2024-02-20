@@ -4,7 +4,9 @@ This is a simple pipeline for [DOST Philippine Institute of Volcanology and Seis
 
 ## Dashboard
 
-[Dashboard Link](https://lookerstudio.google.com/s/grdqh93EDy4) (Updated every minute)
+~~[Dashboard Link](https://lookerstudio.google.com/s/grdqh93EDy4) (Updated every minute)~~
+
+> Dashboard link taken down due to process costs. 
 
 ![Dashboard](./docs/dashboard.gif)
 
